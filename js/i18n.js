@@ -57,6 +57,7 @@ const STRINGS = {
     noTimeLabel: '—',
     errorNoVideoId: "Couldn't recognize a YouTube video URL or ID.",
     errorNeedTranscript: 'Load a video or paste a transcript first.',
+    errorNeedTranscriptOnly: "This video doesn't have a transcript yet. Paste one below, or upload a .vtt/.srt subtitle file, then try again.",
     errorNoStreamUrl: 'Enter a video/stream URL first.',
   },
   zh: {
@@ -116,6 +117,7 @@ const STRINGS = {
     noTimeLabel: '—',
     errorNoVideoId: '无法识别 YouTube 视频链接或 ID。',
     errorNeedTranscript: '请先加载视频或粘贴字幕。',
+    errorNeedTranscriptOnly: '该视频暂无字幕。请在下方粘贴字幕，或上传 .vtt/.srt 字幕文件后重试。',
     errorNoStreamUrl: '请先输入视频/流媒体链接。',
   },
 };

@@ -2,7 +2,7 @@
 // Bump this (and the ?v= query strings + <meta name="app-version"> in
 // index.html) on every change to js/css so browsers don't silently keep
 // serving stale cached assets after index.html itself is reloaded/updated.
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 const state = {
   sourceType: 'youtube', // 'youtube' | 'url' | 'file'
@@ -237,9 +237,7 @@ async function onLoadSubtitleFile(e) {
   }
 }
 
-function onUseManualTranscript() {
-  const text = el('manual-transcript').value;
-  if (!text.trim()) return;
+function applyManualTranscript(text) {
   const { segments } = parseManualTranscript(text);
   state.segments = segments;
   state.transcriptLang = null;
@@ -248,8 +246,36 @@ function onUseManualTranscript() {
   el('workspace').classList.remove('hidden');
   setInlineError('generate-error', '');
   setInlineError('translate-error', '');
-  setStatus(t('statusManualParsed', { count: segments.length }), 'success');
   renderAll();
+  return segments;
+}
+
+function onUseManualTranscript() {
+  const text = el('manual-transcript').value;
+  if (!text.trim()) return;
+  const segments = applyManualTranscript(text);
+  setStatus(t('statusManualParsed', { count: segments.length }), 'success');
+}
+
+// Generate/Translate both need a transcript in state.segments. If the user
+// pasted text (or a subtitle upload filled in) the manual-transcript box but
+// never clicked "Use this transcript", pick it up automatically here rather
+// than making them click twice. Only shows an error if there's truly
+// nothing to work with, and distinguishes "no video loaded" from "video
+// loaded, but no transcript yet" so the message actually matches reality.
+function ensureTranscriptLoaded() {
+  if (state.segments.length) return true;
+
+  const manualText = el('manual-transcript').value;
+  if (manualText.trim()) {
+    const segments = applyManualTranscript(manualText);
+    if (segments.length) return true;
+  }
+
+  const videoLoaded = !el('workspace').classList.contains('hidden');
+  setStatus(t(videoLoaded ? 'errorNeedTranscriptOnly' : 'errorNeedTranscript'), 'error');
+  el('manual-transcript-details').open = true;
+  return false;
 }
 
 function ensureSettingsOrPrompt() {
@@ -267,10 +293,7 @@ function errorMessageFor(e) {
 }
 
 async function onGenerateInsights() {
-  if (!state.segments.length) {
-    setStatus(t('errorNeedTranscript'), 'error');
-    return;
-  }
+  if (!ensureTranscriptLoaded()) return;
   if (!ensureSettingsOrPrompt()) return;
 
   const btn = el('generate-btn');
@@ -318,10 +341,7 @@ async function onGenerateInsights() {
 }
 
 async function onTranslateTranscript() {
-  if (!state.segments.length) {
-    setStatus(t('errorNeedTranscript'), 'error');
-    return;
-  }
+  if (!ensureTranscriptLoaded()) return;
   if (!ensureSettingsOrPrompt()) return;
 
   const targetLang = state.transcriptLang && state.transcriptLang.startsWith('zh') ? 'en' : 'zh';
