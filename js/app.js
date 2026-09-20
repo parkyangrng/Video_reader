@@ -1,5 +1,6 @@
 // Main application state & UI wiring.
 const state = {
+  sourceType: 'youtube', // 'youtube' | 'url' | 'file'
   videoId: null,
   videoMeta: null,
   segments: [],
@@ -42,6 +43,12 @@ function init() {
   el('video-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') onLoadVideo();
   });
+  el('load-url-btn').addEventListener('click', onLoadStreamUrl);
+  el('stream-url-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') onLoadStreamUrl();
+  });
+  el('local-file-input').addEventListener('change', onLoadLocalFile);
+  el('subtitle-file-input').addEventListener('change', onLoadSubtitleFile);
   el('use-manual-transcript').addEventListener('click', onUseManualTranscript);
   el('generate-btn').addEventListener('click', onGenerateInsights);
   el('translate-transcript-btn').addEventListener('click', onTranslateTranscript);
@@ -49,6 +56,9 @@ function init() {
 
   document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+  document.querySelectorAll('.source-tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchSourcePanel(btn.dataset.source));
   });
 
   el('settings-btn').addEventListener('click', openSettings);
@@ -64,6 +74,24 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${tab}`));
 }
 
+function switchSourcePanel(source) {
+  document.querySelectorAll('.source-tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.source === source));
+  document.querySelectorAll('.source-panel').forEach((p) => p.classList.toggle('active', p.id === `source-panel-${source}`));
+}
+
+// Clears everything tied to the previously loaded video/transcript before a
+// new source (of any kind) is loaded.
+function resetForNewSource() {
+  state.videoId = null;
+  state.segments = [];
+  state.transcriptLang = null;
+  state.insights = null;
+  state.translated = { en: null, zh: null };
+  el('manual-transcript').value = '';
+  el('manual-transcript-details').open = false;
+  renderAll();
+}
+
 async function onLoadVideo() {
   const input = el('video-input').value;
   const videoId = parseVideoId(input);
@@ -72,13 +100,11 @@ async function onLoadVideo() {
     return;
   }
 
+  resetForNewSource();
+  state.sourceType = 'youtube';
   state.videoId = videoId;
-  state.segments = [];
-  state.transcriptLang = null;
-  state.insights = null;
-  state.translated = { en: null, zh: null };
   el('workspace').classList.remove('hidden');
-  loadPlayer(videoId, 'player');
+  mountYouTubePlayer(videoId);
 
   setStatus(t('statusFetchingMeta'));
   try {
@@ -104,6 +130,64 @@ async function onLoadVideo() {
     el('manual-transcript-details').open = true;
   }
   renderAll();
+}
+
+function onLoadStreamUrl() {
+  const url = el('stream-url-input').value.trim();
+  if (!url) {
+    setStatus(t('errorNoStreamUrl'), 'error');
+    return;
+  }
+
+  resetForNewSource();
+  state.sourceType = 'url';
+  state.videoMeta = { title: url, author_name: '' };
+  el('video-title').textContent = url;
+  el('video-author').textContent = '';
+  el('workspace').classList.remove('hidden');
+  mountHtml5Player(url);
+
+  setStatus(t('statusNoAutoTranscriptForSource'), 'info');
+  el('manual-transcript-details').open = true;
+  renderAll();
+}
+
+function onLoadLocalFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  resetForNewSource();
+  state.sourceType = 'file';
+  state.videoMeta = { title: file.name, author_name: '' };
+  el('video-title').textContent = file.name;
+  el('video-author').textContent = '';
+  el('workspace').classList.remove('hidden');
+  const blobUrl = URL.createObjectURL(file);
+  mountHtml5Player(blobUrl, { isBlob: true });
+
+  setStatus(t('statusNoAutoTranscriptForSource'), 'info');
+  el('manual-transcript-details').open = true;
+  renderAll();
+}
+
+async function onLoadSubtitleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const cues = parseSubtitleText(text);
+    if (!cues.length) {
+      setStatus(t('statusSubtitleParseFailed'), 'error');
+      return;
+    }
+    el('manual-transcript').value = cuesToManualText(cues);
+    el('manual-transcript-details').open = true;
+    setStatus(t('statusSubtitleParsed', { count: cues.length }), 'success');
+  } catch (err) {
+    setStatus(t('statusSubtitleParseFailed'), 'error');
+  } finally {
+    e.target.value = '';
+  }
 }
 
 function onUseManualTranscript() {
@@ -240,7 +324,7 @@ function renderKeyPoints() {
     )
     .join('');
   list.querySelectorAll('.time-badge').forEach((btn) => {
-    btn.addEventListener('click', () => seekPlayerTo(parseFloat(btn.dataset.time)));
+    btn.addEventListener('click', () => seekTo(parseFloat(btn.dataset.time)));
   });
 }
 
@@ -279,7 +363,7 @@ function renderTranscript() {
     .join('');
   listEl.innerHTML = rows || `<div class="empty-state">${t('statusNoTranscript')}</div>`;
   listEl.querySelectorAll('.time-badge:not(.disabled)').forEach((btn) => {
-    btn.addEventListener('click', () => seekPlayerTo(parseFloat(btn.dataset.time)));
+    btn.addEventListener('click', () => seekTo(parseFloat(btn.dataset.time)));
   });
   el('translate-transcript-btn').textContent = t(enTrans || zhTrans ? 'retranslate' : 'translateTranscript');
 }

@@ -65,6 +65,25 @@ body {
 }
 .input-card label { display: block; margin-bottom: 8px; font-size: 0.85rem; color: var(--muted); }
 
+.source-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.source-tab-btn {
+  background: none; border: none; color: var(--muted);
+  padding: 8px 14px; cursor: pointer; font-size: 0.88rem;
+  border-bottom: 2px solid transparent;
+}
+.source-tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.source-panel { display: none; }
+.source-panel.active { display: block; }
+
+#local-file-input, #subtitle-file-input {
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.subtitle-upload-row { margin: 10px 0; }
+.subtitle-upload-row label { display: inline-block; margin: 0 0 6px; }
+
 .input-row { display: flex; gap: 10px; }
 .input-row input {
   flex: 1;
@@ -79,6 +98,7 @@ body {
 .status-msg { min-height: 1.2em; margin-top: 10px; font-size: 0.88rem; }
 .status-error { color: #ff8080; }
 .status-success { color: #6fd88a; }
+.status-info { color: var(--muted); }
 
 details#manual-transcript-details { margin-top: 14px; }
 details#manual-transcript-details summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
@@ -101,7 +121,9 @@ details#manual-transcript-details summary { cursor: pointer; color: var(--muted)
 
 .player-col { position: sticky; top: 76px; align-self: start; }
 .player-wrap { position: relative; width: 100%; padding-bottom: 56.25%; height: 0; border-radius: var(--radius); overflow: hidden; background: #000; }
-.player-wrap #player, .player-wrap iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+.player-wrap #player-mount-wrap, .player-wrap #player-mount, .player-wrap iframe, .player-wrap video {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+}
 
 #video-title { font-size: 1.05rem; margin: 14px 0 4px; }
 .muted { color: var(--muted); font-size: 0.85rem; margin: 0; }

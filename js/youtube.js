@@ -230,3 +230,14 @@ function seekPlayerTo(seconds) {
     if (ytPlayer.playVideo) ytPlayer.playVideo();
   }
 }
+
+function destroyYtPlayer() {
+  if (ytPlayer && ytPlayer.destroy) {
+    try {
+      ytPlayer.destroy();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  ytPlayer = null;
+}

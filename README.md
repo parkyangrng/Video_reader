@@ -8,10 +8,18 @@ generated content support both **English** and **Chinese**.
 
 ## Features
 
-- Paste a YouTube URL (or bare video ID) and load the embedded player.
-- Best-effort automatic transcript fetch (via public CORS proxies, since
-  YouTube doesn't expose captions to arbitrary browser origins). If that
-  fails, paste the transcript manually (with or without `[mm:ss]` timestamps).
+- Three video sources, switchable via tabs above the input box:
+  - **YouTube** — paste a URL (or bare video ID) to load the embedded player.
+  - **Video URL** — any direct HTTP(S) video/stream URL (mp4, webm, or HLS
+    `.m3u8`; HLS playback uses [hls.js](https://github.com/video-dev/hls.js)
+    loaded on demand from a CDN for browsers without native HLS support).
+  - **Local File** — pick a video file from disk; it's played straight from
+    the browser via an object URL and never uploaded anywhere.
+- Best-effort automatic transcript fetch for YouTube (via public CORS
+  proxies, since YouTube doesn't expose captions to arbitrary browser
+  origins). For all three sources you can also paste a transcript manually
+  (with or without `[mm:ss]` timestamps), or upload a `.vtt`/`.srt` subtitle
+  file to auto-fill the manual transcript box.
 - "Generate Summary & Key Points" calls an LLM (Anthropic Claude or OpenAI,
   your choice) to produce:
   - A bilingual (EN + ZH) summary.
@@ -61,3 +69,10 @@ which is required to call the Claude API directly from a browser.
 - Translation is done in batches of transcript lines; if a provider response
   doesn't match the expected format for a batch, those lines are left blank
   rather than guessed.
+- **Video URL / Local File sources have no automatic transcript.** There's no
+  captions API to query for an arbitrary stream or local file, so upload a
+  matching `.vtt`/`.srt` subtitle file or paste the transcript by hand.
+- A "Video URL" source plays directly in a `<video>` element (no CORS needed
+  for playback itself, same as an `<img>` tag), but it must be a format the
+  browser can decode, served over HTTPS if the page itself is HTTPS, and not
+  blocked by the host's hotlink/referrer checks.

@@ -17,23 +17,51 @@
 
   <main class="container">
     <section class="input-card">
-      <label for="video-input" data-i18n="videoUrlLabel">YouTube video URL or ID</label>
-      <div class="input-row">
-        <input id="video-input" type="text" data-i18n-placeholder="videoUrlPlaceholder" placeholder="https://www.youtube.com/watch?v=..." />
-        <button id="load-btn" class="btn btn-primary" type="button" data-i18n="load">Load Video</button>
+      <div class="source-tabs">
+        <button class="source-tab-btn active" data-source="youtube" type="button" data-i18n="sourceYoutube">YouTube</button>
+        <button class="source-tab-btn" data-source="url" type="button" data-i18n="sourceUrl">Video URL</button>
+        <button class="source-tab-btn" data-source="file" type="button" data-i18n="sourceFile">Local File</button>
       </div>
+
+      <div id="source-panel-youtube" class="source-panel active">
+        <label for="video-input" data-i18n="videoUrlLabel">YouTube video URL or ID</label>
+        <div class="input-row">
+          <input id="video-input" type="text" data-i18n-placeholder="videoUrlPlaceholder" placeholder="https://www.youtube.com/watch?v=..." />
+          <button id="load-btn" class="btn btn-primary" type="button" data-i18n="load">Load Video</button>
+        </div>
+      </div>
+
+      <div id="source-panel-url" class="source-panel">
+        <label for="stream-url-input" data-i18n="streamUrlLabel">Direct video/stream URL (mp4, webm, HLS .m3u8)</label>
+        <div class="input-row">
+          <input id="stream-url-input" type="text" data-i18n-placeholder="streamUrlPlaceholder" placeholder="https://example.com/video.mp4" />
+          <button id="load-url-btn" class="btn btn-primary" type="button" data-i18n="load">Load Video</button>
+        </div>
+      </div>
+
+      <div id="source-panel-file" class="source-panel">
+        <label for="local-file-input" data-i18n="localFileLabel">Choose a local video file</label>
+        <div class="input-row">
+          <input id="local-file-input" type="file" accept="video/*" />
+        </div>
+      </div>
+
       <div id="status-msg" class="status-msg"></div>
       <details id="manual-transcript-details">
         <summary data-i18n="manualTranscriptToggle">Transcript didn't load automatically? Paste it manually</summary>
         <textarea id="manual-transcript" rows="8" data-i18n-placeholder="manualTranscriptPlaceholder"></textarea>
         <div class="hint" data-i18n="manualTranscriptHint">Tip: timestamps let key points link back to exact moments.</div>
+        <div class="subtitle-upload-row">
+          <label for="subtitle-file-input" class="hint" data-i18n="subtitleUploadLabel">Or load a subtitle file (.vtt / .srt) to fill this in:</label>
+          <input id="subtitle-file-input" type="file" accept=".vtt,.srt,text/vtt" />
+        </div>
         <button id="use-manual-transcript" class="btn btn-secondary" type="button" data-i18n="useThisTranscript">Use this transcript</button>
       </details>
     </section>
 
     <section id="workspace" class="workspace hidden">
       <div class="player-col">
-        <div class="player-wrap"><div id="player"></div></div>
+        <div class="player-wrap"><div id="player-mount-wrap"><div id="player-mount"></div></div></div>
         <h2 id="video-title"></h2>
         <p id="video-author" class="muted"></p>
         <button id="generate-btn" class="btn btn-primary full-width" type="button" data-i18n="generateInsights">Generate Summary &amp; Key Points</button>
@@ -90,6 +118,8 @@
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="js/i18n.js"></script>
   <script src="js/youtube.js"></script>
+  <script src="js/subtitles.js"></script>
+  <script src="js/player.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/app.js"></script>
 </body>
