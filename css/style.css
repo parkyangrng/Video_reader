@@ -85,6 +85,9 @@ body {
 .subtitle-upload-row { margin: 10px 0; }
 .subtitle-upload-row label { display: inline-block; margin: 0 0 6px; }
 
+.audio-transcribe-row { margin: 14px 0 4px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.audio-transcribe-row .hint { margin: 0 0 8px; }
+
 .input-row { display: flex; gap: 10px; }
 .input-row input {
   flex: 1;

@@ -2,7 +2,7 @@
 // Bump this (and the ?v= query strings + <meta name="app-version"> in
 // index.html) on every change to js/css so browsers don't silently keep
 // serving stale cached assets after index.html itself is reloaded/updated.
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 
 const state = {
   sourceType: 'youtube', // 'youtube' | 'url' | 'file'
@@ -22,7 +22,15 @@ function loadSettings() {
   } catch (e) {
     /* ignore */
   }
-  return { provider: 'anthropic', model: DEFAULT_MODELS.anthropic, apiKey: '' };
+  return { provider: 'anthropic', model: DEFAULT_MODELS.anthropic, apiKey: '', whisperApiKey: '' };
+}
+
+// Speech-to-text has no Anthropic equivalent, so audio transcription always
+// needs an OpenAI key even when the summarization provider is Claude. Falls
+// back to the main API key if that's already an OpenAI key, so someone who
+// picked OpenAI as their provider doesn't have to paste the same key twice.
+function getWhisperApiKey() {
+  return state.settings.whisperApiKey || (state.settings.provider === 'openai' ? state.settings.apiKey : '');
 }
 
 function saveSettings() {
@@ -95,6 +103,7 @@ function init() {
   el('local-file-input').addEventListener('change', onLoadLocalFile);
   el('subtitle-file-input').addEventListener('change', onLoadSubtitleFile);
   el('use-manual-transcript').addEventListener('click', onUseManualTranscript);
+  el('audio-transcribe-btn').addEventListener('click', onGenerateTranscriptFromAudio);
   el('generate-btn').addEventListener('click', onGenerateInsights);
   el('translate-transcript-btn').addEventListener('click', onTranslateTranscript);
   el('transcript-search').addEventListener('input', renderTranscript);
@@ -134,6 +143,7 @@ function resetForNewSource() {
   state.translated = { en: null, zh: null };
   el('manual-transcript').value = '';
   el('manual-transcript-details').open = false;
+  el('audio-transcribe-row').classList.add('hidden');
   setInlineError('generate-error', '');
   setInlineError('translate-error', '');
   renderAll();
@@ -212,7 +222,11 @@ function onLoadLocalFile(e) {
   const blobUrl = URL.createObjectURL(file);
   mountHtml5Player(blobUrl, { isBlob: true });
 
-  setStatus(t('statusNoAutoTranscriptForSource'), 'info');
+  // Audio-based auto-transcription only works for local files: a blob: URL
+  // is same-origin so Web Audio can read it, unlike an arbitrary remote
+  // "Video URL" which would need the server's own CORS cooperation.
+  el('audio-transcribe-row').classList.remove('hidden');
+  setStatus(t('statusNoAutoTranscriptForFile'), 'info');
   el('manual-transcript-details').open = true;
   renderAll();
 }
@@ -257,13 +271,84 @@ function onUseManualTranscript() {
   setStatus(t('statusManualParsed', { count: segments.length }), 'success');
 }
 
-// Generate/Translate both need a transcript in state.segments. If the user
-// pasted text (or a subtitle upload filled in) the manual-transcript box but
-// never clicked "Use this transcript", pick it up automatically here rather
-// than making them click twice. Only shows an error if there's truly
-// nothing to work with, and distinguishes "no video loaded" from "video
-// loaded, but no transcript yet" so the message actually matches reality.
-function ensureTranscriptLoaded() {
+// Runs the record-audio-then-Whisper pipeline (js/transcribe.js) against the
+// currently loaded local file and, on success, drops the result into
+// state.segments exactly like a manual paste would. Returns false (without
+// erroring) when the pipeline simply isn't applicable — no local file
+// loaded, or no Whisper key configured — so callers can decide how to
+// report that; throws on an actual failure once the pipeline has started.
+async function generateTranscriptFromVideoAudio(progressId) {
+  const videoEl = getActiveHtml5Element();
+  if (!videoEl || state.sourceType !== 'file') return false;
+  const whisperKey = getWhisperApiKey();
+  if (!whisperKey) return false;
+
+  showProgress(progressId, { indeterminate: false });
+  setProgressPercent(progressId, 0);
+  try {
+    const segments = await transcribeVideoAudio({
+      videoEl,
+      apiKey: whisperKey,
+      onProgress: (p) => {
+        if (p.stage === 'recording') {
+          setProgressLabel(progressId, t('progressRecordingAudio', { percent: Math.round(p.fraction * 100) }));
+          setProgressPercent(progressId, p.fraction * 70); // last 30% reserved for the Whisper call(s)
+        } else if (p.stage === 'transcribing') {
+          setProgressLabel(progressId, t('progressTranscribingChunk', { current: p.chunkIndex, total: p.totalChunks }));
+          setProgressPercent(progressId, 70 + (p.chunkIndex / p.totalChunks) * 30);
+        }
+      },
+    });
+    if (!segments.length) throw new Error(t('statusAudioTranscribeEmpty'));
+    state.segments = segments;
+    state.transcriptLang = null;
+    state.insights = null;
+    state.translated = { en: null, zh: null };
+    el('manual-transcript').value = segments.map((s) => `[${formatTime(s.start)}] ${s.text}`).join('\n');
+    renderAll();
+    return true;
+  } finally {
+    hideProgress(progressId);
+  }
+}
+
+async function onGenerateTranscriptFromAudio() {
+  const btn = el('audio-transcribe-btn');
+  if (btn.disabled) return;
+  if (!getActiveHtml5Element() || state.sourceType !== 'file') {
+    setStatus(t('errorNoAudioSource'), 'error');
+    return;
+  }
+  if (!getWhisperApiKey()) {
+    setStatus(t('statusNeedWhisperKey'), 'error');
+    openSettings();
+    return;
+  }
+
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = t('transcribingAudio');
+  setStatus('');
+  try {
+    await generateTranscriptFromVideoAudio('audio-transcribe-progress');
+    setStatus(t('statusAudioTranscribeDone', { count: state.segments.length }), 'success');
+  } catch (e) {
+    setStatus(t('statusAudioTranscribeFailed', { error: e.message }), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+// Generate/Translate both need a transcript in state.segments. In order of
+// preference: (1) segments already loaded, (2) whatever's sitting in the
+// manual-transcript box (pasted, or filled in by a subtitle upload) even if
+// "Use this transcript" was never clicked, (3) for a local file with a
+// Whisper key configured, auto-build one from the file's own audio, (4)
+// otherwise report an error whose wording actually matches what's missing
+// (no video at all vs. a video with no transcript vs. a video that could
+// auto-transcribe if a Whisper key were added).
+async function ensureTranscriptLoaded(progressId) {
   if (state.segments.length) return true;
 
   const manualText = el('manual-transcript').value;
@@ -272,8 +357,21 @@ function ensureTranscriptLoaded() {
     if (segments.length) return true;
   }
 
+  if (state.sourceType === 'file' && getActiveHtml5Element() && getWhisperApiKey()) {
+    try {
+      if (await generateTranscriptFromVideoAudio(progressId)) return true;
+    } catch (e) {
+      setInlineError(progressId === 'generate-progress' ? 'generate-error' : 'translate-error', t('statusAudioTranscribeFailed', { error: e.message }));
+      return false;
+    }
+  }
+
   const videoLoaded = !el('workspace').classList.contains('hidden');
-  setStatus(t(videoLoaded ? 'errorNeedTranscriptOnly' : 'errorNeedTranscript'), 'error');
+  let msgKey = 'errorNeedTranscript';
+  if (videoLoaded) {
+    msgKey = state.sourceType === 'file' ? 'errorNeedTranscriptOrWhisperKey' : 'errorNeedTranscriptOnly';
+  }
+  setStatus(t(msgKey), 'error');
   el('manual-transcript-details').open = true;
   return false;
 }
@@ -293,47 +391,52 @@ function errorMessageFor(e) {
 }
 
 async function onGenerateInsights() {
-  if (!ensureTranscriptLoaded()) return;
+  const btn = el('generate-btn');
+  if (btn.disabled) return;
   if (!ensureSettingsOrPrompt()) return;
 
-  const btn = el('generate-btn');
   btn.disabled = true;
   const originalLabel = btn.textContent;
   btn.textContent = t('generating');
   setStatus('');
   setInlineError('generate-error', '');
-  showProgress('generate-progress', { indeterminate: true });
-  setProgressLabel('generate-progress', t('progressConnecting'));
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    state.insights = await generateInsights({
-      provider: state.settings.provider,
-      apiKey: state.settings.apiKey,
-      model: state.settings.model,
-      segments: state.segments,
-      videoTitle: state.videoMeta?.title,
-      signal: controller.signal,
-      onProgress: (p) => {
-        if (p.stage === 'connecting') {
-          setProgressLabel('generate-progress', t('progressConnecting'));
-        } else if (p.stage === 'streaming') {
-          setProgressLabel('generate-progress', t('progressStreaming', { chars: p.charsReceived }));
-        } else if (p.stage === 'parsing') {
-          setProgressLabel('generate-progress', t('progressParsing'));
-        }
-      },
-    });
-    renderSummary();
-    renderKeyPoints();
-    switchTab('summary');
-  } catch (e) {
-    const message = errorMessageFor(e);
-    setStatus(t('statusGenerateFailed', { error: message }), 'error');
-    setInlineError('generate-error', t('statusGenerateFailed', { error: message }));
+    if (!(await ensureTranscriptLoaded('generate-progress'))) return;
+
+    showProgress('generate-progress', { indeterminate: true });
+    setProgressLabel('generate-progress', t('progressConnecting'));
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      state.insights = await generateInsights({
+        provider: state.settings.provider,
+        apiKey: state.settings.apiKey,
+        model: state.settings.model,
+        segments: state.segments,
+        videoTitle: state.videoMeta?.title,
+        signal: controller.signal,
+        onProgress: (p) => {
+          if (p.stage === 'connecting') {
+            setProgressLabel('generate-progress', t('progressConnecting'));
+          } else if (p.stage === 'streaming') {
+            setProgressLabel('generate-progress', t('progressStreaming', { chars: p.charsReceived }));
+          } else if (p.stage === 'parsing') {
+            setProgressLabel('generate-progress', t('progressParsing'));
+          }
+        },
+      });
+      renderSummary();
+      renderKeyPoints();
+      switchTab('summary');
+    } catch (e) {
+      const message = errorMessageFor(e);
+      setStatus(t('statusGenerateFailed', { error: message }), 'error');
+      setInlineError('generate-error', t('statusGenerateFailed', { error: message }));
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } finally {
-    clearTimeout(timeoutId);
     hideProgress('generate-progress');
     btn.disabled = false;
     btn.textContent = originalLabel;
@@ -341,44 +444,49 @@ async function onGenerateInsights() {
 }
 
 async function onTranslateTranscript() {
-  if (!ensureTranscriptLoaded()) return;
+  const btn = el('translate-transcript-btn');
+  if (btn.disabled) return;
   if (!ensureSettingsOrPrompt()) return;
 
-  const targetLang = state.transcriptLang && state.transcriptLang.startsWith('zh') ? 'en' : 'zh';
-  const btn = el('translate-transcript-btn');
   btn.disabled = true;
   const originalLabel = btn.textContent;
   btn.textContent = t('translating');
   setStatus('');
   setInlineError('translate-error', '');
-  showProgress('translate-progress', { indeterminate: false });
-  setProgressPercent('translate-progress', 0);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const translated = await translateTranscript({
-      provider: state.settings.provider,
-      apiKey: state.settings.apiKey,
-      model: state.settings.model,
-      segments: state.segments,
-      targetLang,
-      signal: controller.signal,
-      onProgress: (p) => {
-        if (p.stage === 'batch') {
-          setProgressLabel('translate-progress', t('progressTranslateBatch', { current: p.batchIndex, total: p.totalBatches }));
-          setProgressPercent('translate-progress', ((p.batchIndex - 1) / p.totalBatches) * 100);
-        }
-      },
-    });
-    state.translated[targetLang] = translated;
-    renderTranscript();
-  } catch (e) {
-    const message = errorMessageFor(e);
-    setStatus(t('statusTranslateFailed', { error: message }), 'error');
-    setInlineError('translate-error', t('statusTranslateFailed', { error: message }));
+    if (!(await ensureTranscriptLoaded('translate-progress'))) return;
+
+    const targetLang = state.transcriptLang && state.transcriptLang.startsWith('zh') ? 'en' : 'zh';
+    showProgress('translate-progress', { indeterminate: false });
+    setProgressPercent('translate-progress', 0);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const translated = await translateTranscript({
+        provider: state.settings.provider,
+        apiKey: state.settings.apiKey,
+        model: state.settings.model,
+        segments: state.segments,
+        targetLang,
+        signal: controller.signal,
+        onProgress: (p) => {
+          if (p.stage === 'batch') {
+            setProgressLabel('translate-progress', t('progressTranslateBatch', { current: p.batchIndex, total: p.totalBatches }));
+            setProgressPercent('translate-progress', ((p.batchIndex - 1) / p.totalBatches) * 100);
+          }
+        },
+      });
+      state.translated[targetLang] = translated;
+      renderTranscript();
+    } catch (e) {
+      const message = errorMessageFor(e);
+      setStatus(t('statusTranslateFailed', { error: message }), 'error');
+      setInlineError('translate-error', t('statusTranslateFailed', { error: message }));
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } finally {
-    clearTimeout(timeoutId);
     hideProgress('translate-progress');
     btn.disabled = false;
     btn.textContent = t(state.translated.en || state.translated.zh ? 'retranslate' : 'translateTranscript');
@@ -489,6 +597,7 @@ function openSettings() {
   el('provider-select').value = state.settings.provider;
   el('model-input').value = state.settings.model || DEFAULT_MODELS[state.settings.provider];
   el('api-key-input').value = state.settings.apiKey || '';
+  el('whisper-api-key-input').value = state.settings.whisperApiKey || '';
   el('settings-modal').classList.remove('hidden');
 }
 
@@ -501,6 +610,7 @@ function onSaveSettings() {
     provider: el('provider-select').value,
     model: el('model-input').value.trim() || DEFAULT_MODELS[el('provider-select').value],
     apiKey: el('api-key-input').value.trim(),
+    whisperApiKey: el('whisper-api-key-input').value.trim(),
   };
   saveSettings();
   closeSettings();

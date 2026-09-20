@@ -99,6 +99,27 @@ async function readErrorMessage(res) {
   }
 }
 
+// Speech-to-text has no Anthropic equivalent, so building a transcript from
+// audio always goes through OpenAI's Whisper endpoint regardless of which
+// provider is chosen for summarization. whisper-1 (rather than the newer
+// gpt-4o-transcribe models) is used specifically because it supports
+// response_format=verbose_json with per-segment start/end timestamps, which
+// our clickable time-stamped key points depend on.
+async function transcribeAudioChunk({ apiKey, blob, filename = 'audio.webm', signal }) {
+  const form = new FormData();
+  form.append('file', blob, filename);
+  form.append('model', 'whisper-1');
+  form.append('response_format', 'verbose_json');
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    signal,
+    headers: { authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Whisper transcription error: ${await readErrorMessage(res)}`);
+  return res.json();
+}
+
 async function callAnthropic(apiKey, model, system, user, maxTokens = 4096, opts = {}) {
   const { onDelta, signal } = opts;
   const res = await fetch('https://api.anthropic.com/v1/messages', {

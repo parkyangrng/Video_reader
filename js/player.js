@@ -95,6 +95,14 @@ function mountHtml5Player(src, { isBlob = false } = {}) {
   }
 }
 
+// Exposes the live <video> element so other modules (audio transcription)
+// can tap its decoded audio via Web Audio. Only meaningful in 'html5' mode;
+// the YouTube IFrame player is a cross-origin iframe with no accessible
+// media element at all.
+function getActiveHtml5Element() {
+  return playerMode === 'html5' ? html5El : null;
+}
+
 function seekTo(seconds) {
   if (playerMode === 'youtube') {
     seekPlayerTo(seconds);

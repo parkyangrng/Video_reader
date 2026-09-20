@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="app-version" content="1.2.0" />
+<meta name="app-version" content="1.3.0" />
 <title>YouTube Video Reader</title>
-<link rel="stylesheet" href="css/style.css?v=1.2.0" />
+<link rel="stylesheet" href="css/style.css?v=1.3.0" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🎬 <span data-i18n="appTitle">YouTube Video Reader</span> <span id="app-version" class="version-badge">v1.2.0</span></div>
+    <div class="brand">🎬 <span data-i18n="appTitle">YouTube Video Reader</span> <span id="app-version" class="version-badge">v1.3.0</span></div>
     <div class="top-actions">
       <button id="lang-toggle" class="btn btn-ghost" type="button">中文</button>
       <button id="settings-btn" class="btn btn-ghost" type="button" data-i18n="settings">Settings</button>
@@ -57,6 +57,15 @@
           <input id="subtitle-file-input" type="file" accept=".vtt,.srt,text/vtt" />
         </div>
         <button id="use-manual-transcript" class="btn btn-secondary" type="button" data-i18n="useThisTranscript">Use this transcript</button>
+
+        <div id="audio-transcribe-row" class="audio-transcribe-row hidden">
+          <div class="hint" data-i18n="audioTranscribeHint">Or generate a transcript automatically from this video's audio (uses OpenAI Whisper; runs in the background, muted, and takes roughly a quarter of the video's length):</div>
+          <button id="audio-transcribe-btn" class="btn btn-secondary" type="button" data-i18n="audioTranscribeBtn">Generate transcript from audio</button>
+          <div id="audio-transcribe-progress" class="progress-block hidden">
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+            <div class="progress-label"></div>
+          </div>
+        </div>
       </details>
     </section>
 
@@ -119,6 +128,10 @@
       <label for="api-key-input" data-i18n="apiKeyLabel">API Key</label>
       <input id="api-key-input" type="password" placeholder="sk-..." />
       <p class="hint" data-i18n="apiKeyHint">Stored only in your browser's local storage.</p>
+
+      <label for="whisper-api-key-input" data-i18n="whisperApiKeyLabel">OpenAI API Key (for audio transcription)</label>
+      <input id="whisper-api-key-input" type="password" placeholder="sk-..." />
+      <p class="hint" data-i18n="whisperApiKeyHint">Only used to build a transcript from a local video file's audio via Whisper when none exists yet. Separate from the key above — needed even if you use Claude for summaries. Optional.</p>
       <div class="modal-actions">
         <button id="settings-cancel" class="btn btn-ghost" type="button" data-i18n="cancel">Cancel</button>
         <button id="settings-save" class="btn btn-primary" type="button" data-i18n="save">Save</button>
@@ -127,11 +140,12 @@
   </div>
 
   <script src="https://www.youtube.com/iframe_api"></script>
-  <script src="js/i18n.js?v=1.2.0"></script>
-  <script src="js/youtube.js?v=1.2.0"></script>
-  <script src="js/subtitles.js?v=1.2.0"></script>
-  <script src="js/player.js?v=1.2.0"></script>
-  <script src="js/ai.js?v=1.2.0"></script>
-  <script src="js/app.js?v=1.2.0"></script>
+  <script src="js/i18n.js?v=1.3.0"></script>
+  <script src="js/youtube.js?v=1.3.0"></script>
+  <script src="js/subtitles.js?v=1.3.0"></script>
+  <script src="js/player.js?v=1.3.0"></script>
+  <script src="js/transcribe.js?v=1.3.0"></script>
+  <script src="js/ai.js?v=1.3.0"></script>
+  <script src="js/app.js?v=1.3.0"></script>
 </body>
 </html>

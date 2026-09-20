@@ -20,6 +20,15 @@ generated content support both **English** and **Chinese**.
   origins). For all three sources you can also paste a transcript manually
   (with or without `[mm:ss]` timestamps), or upload a `.vtt`/`.srt` subtitle
   file to auto-fill the manual transcript box.
+- **For a Local File with no transcript, the app can build one from scratch**:
+  it plays the file's audio in the background (muted, sped up ~4x) while
+  capturing it via the Web Audio API, sends the recording to OpenAI's
+  Whisper API in ~15-minute chunks, and merges the results back into a
+  normal timestamped transcript — no manual transcription needed. This
+  happens automatically the first time you click "Generate Summary & Key
+  Points" on a file with no transcript (if a Whisper key is configured), or
+  on demand via the "Generate transcript from audio" button next to the
+  manual-transcript box.
 - "Generate Summary & Key Points" calls an LLM (Anthropic Claude or OpenAI,
   your choice) to produce:
   - A bilingual (EN + ZH) summary.
@@ -62,11 +71,18 @@ reliable for the network requests this app makes.)
 
 Click **Settings** and enter:
 
-- **Provider**: Anthropic (Claude) or OpenAI (GPT).
+- **Provider**: Anthropic (Claude) or OpenAI (GPT), used for summaries/key
+  points/translation.
 - **Model**: defaults are pre-filled; change if you prefer another model.
 - **API Key**: your own key for that provider.
+- **OpenAI API Key (for audio transcription)**: a separate, optional key used
+  only to build a transcript from a local file's audio via Whisper. This is
+  needed even if your main provider above is Claude, since Anthropic has no
+  speech-to-text API — Whisper is OpenAI-specific. If your main provider is
+  already OpenAI, this field reuses that key unless you fill in a different
+  one.
 
-The key is stored only in your browser's `localStorage` and is sent directly
+Both keys are stored only in your browser's `localStorage` and sent directly
 from your browser to the provider's API — never anywhere else. Anthropic
 requests include the `anthropic-dangerous-direct-browser-access` header,
 which is required to call the Claude API directly from a browser.
@@ -92,3 +108,19 @@ which is required to call the Claude API directly from a browser.
   for playback itself, same as an `<img>` tag), but it must be a format the
   browser can decode, served over HTTPS if the page itself is HTTPS, and not
   blocked by the host's hotlink/referrer checks.
+- **Audio-based transcription only covers Local File sources, not Video URL.**
+  A local file's `blob:` URL is same-origin, so the Web Audio API can read
+  its audio outright. A remote "Video URL" would need the server to send
+  permissive CORS headers for that to work at all — since most don't, and
+  forcing it (`crossOrigin="anonymous"`) would break playback entirely on
+  servers that don't support CORS, that source type sticks to manual
+  transcript entry / subtitle upload.
+- Audio transcription runs at roughly 1/4 of the video's real length (it
+  plays the file at 4x speed in the background to capture the audio) and, for
+  a long video, in ~15-minute chunks sent one at a time to Whisper — so
+  expect it to take real time proportional to the video's length, not be
+  instant. There's no cancel button yet; reloading the page stops it.
+- Whisper's `whisper-1` model is used specifically (rather than newer
+  `gpt-4o-transcribe` models) because it supports `response_format=
+  verbose_json` with per-segment timestamps, which the clickable key points
+  and transcript rows depend on.
