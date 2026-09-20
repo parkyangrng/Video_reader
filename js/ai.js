@@ -22,14 +22,14 @@ function segmentsToPromptText(segments, maxChars = 60000) {
 
 function buildInsightsPrompt(segments, videoTitle) {
   const { text, truncated } = segmentsToPromptText(segments);
-  const system = `You are an expert video content analyst. You will be given a timestamped transcript of a YouTube video, which may be in English, Chinese, or a mix. Respond with ONLY a single JSON object (no prose, no markdown fences) with exactly this shape:
+  const system = `You are an expert video content analyst. You will be given a timestamped transcript of a video, which may be in any language. Respond with ONLY a single JSON object (no prose, no markdown fences) with exactly this shape:
 {
-  "summary": {"en": "4-8 sentence summary in English", "zh": "同样内容的中文摘要，4-8句"},
+  "summary": "4-8 sentence summary in English",
   "key_points": [
-    {"time": <integer seconds, must match a timestamp actually present in the transcript>, "en": "concise key point in English", "zh": "对应关键点的中文"}
+    {"time": <integer seconds, must match a timestamp actually present in the transcript>, "text": "concise key point in English"}
   ]
 }
-Produce between 5 and 12 key_points, ordered by time ascending, covering the most important ideas across the whole video (not just the start). Both "en" and "zh" fields are REQUIRED for every item and for the summary, regardless of the transcript's original language — translate as needed so both languages are complete, natural, and convey the same meaning. Do not invent timestamps that aren't grounded in the transcript.`;
+Produce between 5 and 12 key_points, ordered by time ascending, covering the most important ideas across the whole video (not just the start). Write the summary and every key point in English regardless of the transcript's original language — translate as needed. Do not invent timestamps that aren't grounded in the transcript.`;
   const titleLine = videoTitle ? `Video title: ${videoTitle}\n\n` : '';
   const truncNote = truncated
     ? '\n\n[Note: transcript was truncated to fit context length; base your analysis on the portion provided.]'
@@ -190,38 +190,8 @@ async function generateInsights({ provider, apiKey, model, segments, videoTitle,
     throw new Error('AI response was missing expected fields.');
   }
   json.key_points = json.key_points
-    .filter((kp) => typeof kp.time === 'number' && kp.en && kp.zh)
+    .filter((kp) => typeof kp.time === 'number' && kp.text)
     .sort((a, b) => a.time - b.time);
   onProgress?.({ stage: 'done' });
   return json;
-}
-
-// Translates transcript lines into targetLang ('en' or 'zh') in numbered
-// batches so the response can be parsed back into per-line order reliably.
-// Reports batch-level progress since the batch count is known up front.
-async function translateTranscript({ provider, apiKey, model, segments, targetLang, onProgress, signal }) {
-  if (!apiKey) throw new Error('Missing API key.');
-  const targetName = targetLang === 'zh' ? 'Simplified Chinese' : 'English';
-  const batchSize = 80;
-  const results = new Array(segments.length).fill('');
-  const totalBatches = Math.ceil(segments.length / batchSize);
-
-  for (let i = 0; i < segments.length; i += batchSize) {
-    const batchIndex = Math.floor(i / batchSize) + 1;
-    onProgress?.({ stage: 'batch', batchIndex, totalBatches });
-    const batch = segments.slice(i, i + batchSize);
-    const numbered = batch.map((s, idx) => `${idx + 1}) ${s.text}`).join('\n');
-    const system = `You are a professional subtitle translator. Translate each numbered line into ${targetName}. Respond with ONLY the same numbered lines translated, one per line, in the same order, using the format "N) translated text". Do not merge, skip, add, or reorder lines. Keep translations concise and natural.`;
-    const raw = await callProvider(provider, apiKey, model, system, numbered, 4096, { signal });
-    const lineMap = {};
-    raw.split('\n').forEach((line) => {
-      const m = line.match(/^\s*(\d+)\)\s?(.*)$/);
-      if (m) lineMap[parseInt(m[1], 10)] = m[2].trim();
-    });
-    batch.forEach((s, idx) => {
-      results[i + idx] = lineMap[idx + 1] || '';
-    });
-  }
-  onProgress?.({ stage: 'done' });
-  return results;
 }

@@ -2,7 +2,7 @@
 // Bump this (and the ?v= query strings + <meta name="app-version"> in
 // index.html) on every change to js/css so browsers don't silently keep
 // serving stale cached assets after index.html itself is reloaded/updated.
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 const state = {
   sourceType: 'youtube', // 'youtube' | 'url' | 'file'
@@ -11,7 +11,6 @@ const state = {
   segments: [],
   transcriptLang: null,
   insights: null,
-  translated: { en: null, zh: null },
   settings: loadSettings(),
 };
 
@@ -50,9 +49,9 @@ function setStatus(msg, kind = 'info') {
   if (msg) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// Inline error shown right next to the action that failed (Generate /
-// Translate), so it's visible even when the page is scrolled and the
-// top status bar is out of view.
+// Inline error shown right next to the Generate button, so it's visible
+// even when the page is scrolled and the sidebar's status bar is out of
+// view.
 function setInlineError(id, msg) {
   const box = el(id);
   box.textContent = msg || '';
@@ -82,15 +81,20 @@ function hideProgress(id) {
   el(id).classList.add('hidden');
 }
 
+// Reveals the main-stage workspace (video + tabs) and hides the "load a
+// video to get started" placeholder. Used wherever a source produces
+// something worth showing (a loaded video, or even just a pasted
+// transcript before any video has been loaded).
+function showWorkspace() {
+  el('workspace').classList.remove('hidden');
+  el('video-empty-state').classList.add('hidden');
+}
+
 function init() {
   console.log(`YouTube Video Reader v${APP_VERSION}`);
   const badge = el('app-version');
   if (badge) badge.textContent = `v${APP_VERSION}`;
   applyI18n();
-  el('lang-toggle').addEventListener('click', () => {
-    setUiLang(getUiLang() === 'en' ? 'zh' : 'en');
-    renderAll();
-  });
 
   el('load-btn').addEventListener('click', onLoadVideo);
   el('video-input').addEventListener('keydown', (e) => {
@@ -105,7 +109,6 @@ function init() {
   el('use-manual-transcript').addEventListener('click', onUseManualTranscript);
   el('audio-transcribe-btn').addEventListener('click', onGenerateTranscriptFromAudio);
   el('generate-btn').addEventListener('click', onGenerateInsights);
-  el('translate-transcript-btn').addEventListener('click', onTranslateTranscript);
   el('transcript-search').addEventListener('input', renderTranscript);
 
   document.querySelectorAll('.tab-btn').forEach((btn) => {
@@ -140,12 +143,10 @@ function resetForNewSource() {
   state.segments = [];
   state.transcriptLang = null;
   state.insights = null;
-  state.translated = { en: null, zh: null };
   el('manual-transcript').value = '';
   el('manual-transcript-details').open = false;
   el('audio-transcribe-row').classList.add('hidden');
   setInlineError('generate-error', '');
-  setInlineError('translate-error', '');
   renderAll();
 }
 
@@ -160,7 +161,7 @@ async function onLoadVideo() {
   resetForNewSource();
   state.sourceType = 'youtube';
   state.videoId = videoId;
-  el('workspace').classList.remove('hidden');
+  showWorkspace();
   mountYouTubePlayer(videoId);
 
   setStatus(t('statusFetchingMeta'));
@@ -201,7 +202,7 @@ function onLoadStreamUrl() {
   state.videoMeta = { title: url, author_name: '' };
   el('video-title').textContent = url;
   el('video-author').textContent = '';
-  el('workspace').classList.remove('hidden');
+  showWorkspace();
   mountHtml5Player(url);
 
   setStatus(t('statusNoAutoTranscriptForSource'), 'info');
@@ -218,7 +219,7 @@ function onLoadLocalFile(e) {
   state.videoMeta = { title: file.name, author_name: '' };
   el('video-title').textContent = file.name;
   el('video-author').textContent = '';
-  el('workspace').classList.remove('hidden');
+  showWorkspace();
   const blobUrl = URL.createObjectURL(file);
   mountHtml5Player(blobUrl, { isBlob: true });
 
@@ -256,10 +257,8 @@ function applyManualTranscript(text) {
   state.segments = segments;
   state.transcriptLang = null;
   state.insights = null;
-  state.translated = { en: null, zh: null };
-  el('workspace').classList.remove('hidden');
+  showWorkspace();
   setInlineError('generate-error', '');
-  setInlineError('translate-error', '');
   renderAll();
   return segments;
 }
@@ -303,7 +302,6 @@ async function generateTranscriptFromVideoAudio(progressId) {
     state.segments = segments;
     state.transcriptLang = null;
     state.insights = null;
-    state.translated = { en: null, zh: null };
     el('manual-transcript').value = segments.map((s) => `[${formatTime(s.start)}] ${s.text}`).join('\n');
     renderAll();
     return true;
@@ -340,8 +338,8 @@ async function onGenerateTranscriptFromAudio() {
   }
 }
 
-// Generate/Translate both need a transcript in state.segments. In order of
-// preference: (1) segments already loaded, (2) whatever's sitting in the
+// Generate needs a transcript in state.segments. In order of preference:
+// (1) segments already loaded, (2) whatever's sitting in the
 // manual-transcript box (pasted, or filled in by a subtitle upload) even if
 // "Use this transcript" was never clicked, (3) for a local file with a
 // Whisper key configured, auto-build one from the file's own audio, (4)
@@ -361,7 +359,7 @@ async function ensureTranscriptLoaded(progressId) {
     try {
       if (await generateTranscriptFromVideoAudio(progressId)) return true;
     } catch (e) {
-      setInlineError(progressId === 'generate-progress' ? 'generate-error' : 'translate-error', t('statusAudioTranscribeFailed', { error: e.message }));
+      setInlineError('generate-error', t('statusAudioTranscribeFailed', { error: e.message }));
       return false;
     }
   }
@@ -443,56 +441,6 @@ async function onGenerateInsights() {
   }
 }
 
-async function onTranslateTranscript() {
-  const btn = el('translate-transcript-btn');
-  if (btn.disabled) return;
-  if (!ensureSettingsOrPrompt()) return;
-
-  btn.disabled = true;
-  const originalLabel = btn.textContent;
-  btn.textContent = t('translating');
-  setStatus('');
-  setInlineError('translate-error', '');
-
-  try {
-    if (!(await ensureTranscriptLoaded('translate-progress'))) return;
-
-    const targetLang = state.transcriptLang && state.transcriptLang.startsWith('zh') ? 'en' : 'zh';
-    showProgress('translate-progress', { indeterminate: false });
-    setProgressPercent('translate-progress', 0);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const translated = await translateTranscript({
-        provider: state.settings.provider,
-        apiKey: state.settings.apiKey,
-        model: state.settings.model,
-        segments: state.segments,
-        targetLang,
-        signal: controller.signal,
-        onProgress: (p) => {
-          if (p.stage === 'batch') {
-            setProgressLabel('translate-progress', t('progressTranslateBatch', { current: p.batchIndex, total: p.totalBatches }));
-            setProgressPercent('translate-progress', ((p.batchIndex - 1) / p.totalBatches) * 100);
-          }
-        },
-      });
-      state.translated[targetLang] = translated;
-      renderTranscript();
-    } catch (e) {
-      const message = errorMessageFor(e);
-      setStatus(t('statusTranslateFailed', { error: message }), 'error');
-      setInlineError('translate-error', t('statusTranslateFailed', { error: message }));
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  } finally {
-    hideProgress('translate-progress');
-    btn.disabled = false;
-    btn.textContent = t(state.translated.en || state.translated.zh ? 'retranslate' : 'translateTranscript');
-  }
-}
-
 function renderAll() {
   renderTranscript();
   renderSummary();
@@ -509,16 +457,7 @@ function renderSummary() {
   }
   empty.classList.add('hidden');
   content.classList.remove('hidden');
-  content.innerHTML = `
-    <div class="lang-card">
-      <h3>${t('summaryHeadingEn')}</h3>
-      <p>${escapeHtml(state.insights.summary.en)}</p>
-    </div>
-    <div class="lang-card">
-      <h3>${t('summaryHeadingZh')}</h3>
-      <p>${escapeHtml(state.insights.summary.zh)}</p>
-    </div>
-  `;
+  content.innerHTML = `<div class="summary-card"><p>${escapeHtml(state.insights.summary)}</p></div>`;
 }
 
 function renderKeyPoints() {
@@ -536,8 +475,7 @@ function renderKeyPoints() {
       <li class="keypoint-item">
         <button class="time-badge" data-time="${kp.time}">${formatTime(kp.time)}</button>
         <div class="keypoint-text">
-          <p class="kp-en">${escapeHtml(kp.en)}</p>
-          <p class="kp-zh">${escapeHtml(kp.zh)}</p>
+          <p>${escapeHtml(kp.text)}</p>
         </div>
       </li>`
     )
@@ -554,28 +492,19 @@ function renderTranscript() {
     listEl.innerHTML = `<div class="empty-state">${t('statusNoTranscript')}</div>`;
     return;
   }
-  const enTrans = state.translated.en;
-  const zhTrans = state.translated.zh;
 
   const rows = state.segments
-    .map((seg, idx) => {
-      const extra = enTrans ? enTrans[idx] : zhTrans ? zhTrans[idx] : null;
-      const matches =
-        !query ||
-        seg.text.toLowerCase().includes(query) ||
-        (extra && extra.toLowerCase().includes(query));
-      if (!matches) return '';
+    .map((seg) => {
+      if (query && !seg.text.toLowerCase().includes(query)) return '';
       const timeHtml =
         seg.start != null
           ? `<button class="time-badge" data-time="${seg.start}">${formatTime(seg.start)}</button>`
           : `<span class="time-badge disabled">${t('noTimeLabel')}</span>`;
-      const extraHtml = extra ? `<p class="transcript-extra">${escapeHtml(extra)}</p>` : '';
       return `
         <div class="transcript-row">
           ${timeHtml}
           <div class="transcript-text">
             <p>${escapeHtml(seg.text)}</p>
-            ${extraHtml}
           </div>
         </div>`;
     })
@@ -584,7 +513,6 @@ function renderTranscript() {
   listEl.querySelectorAll('.time-badge:not(.disabled)').forEach((btn) => {
     btn.addEventListener('click', () => seekTo(parseFloat(btn.dataset.time)));
   });
-  el('translate-transcript-btn').textContent = t(enTrans || zhTrans ? 'retranslate' : 'translateTranscript');
 }
 
 function escapeHtml(str) {

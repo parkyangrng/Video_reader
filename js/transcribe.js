@@ -1,7 +1,8 @@
 // Builds a transcript from scratch when none exists, by capturing the local
-// video file's own decoded audio (via Web Audio) while it plays sped-up and
-// muted in the background, then sending the recorded audio to OpenAI's
-// Whisper transcription API in time-bounded chunks.
+// video file's own decoded audio (via Web Audio) while it plays sped-up in
+// the background (silently, by simply not routing to the speakers — see
+// getOrCreateAudioTap for why that matters), then sending the recorded
+// audio to OpenAI's Whisper transcription API in time-bounded chunks.
 //
 // Deliberately scoped to local files: a local file's blob: URL is
 // same-origin, so Web Audio can read its audio data outright. A remote
@@ -23,10 +24,22 @@ function pickAudioMimeType() {
 
 // createMediaElementSource() may only be called once per <video> element
 // ever (it throws on a second call). Cache the tap on the element itself so
-// re-running "generate transcript from audio" on the same video works, and
-// route the source to both the capture destination AND the normal speaker
-// destination so creating the tap doesn't silently mute the video for
-// everyday playback afterward.
+// re-running "generate transcript from audio" on the same video works.
+//
+// The capture-time destination (dest) is connected immediately, but the
+// normal speaker destination is deliberately NOT connected until capture
+// finishes (see recordAudioFromVideo's cleanup). Two reasons: it keeps the
+// sped-up audio from blaring out of the speakers while this runs in the
+// background, and — the actual bug this fixes — it means we never touch
+// the video element's own `.muted` property to achieve that silence.
+// Setting `.muted = true` on the element before capture was the original
+// approach, but on Chromium `muted` can make the browser skip decoding the
+// audio track entirely (an autoplay-policy optimization), which fed
+// near-silence into the recording; Whisper's well-known response to
+// silence is to hallucinate short filler phrases ("you", "thanks for
+// watching") repeated at every timestamp — exactly the symptom this was
+// causing. Not connecting to a destination at all guarantees silence
+// without going anywhere near `.muted`.
 function getOrCreateAudioTap(videoEl) {
   if (videoEl._audioTap) return videoEl._audioTap;
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -34,8 +47,7 @@ function getOrCreateAudioTap(videoEl) {
   const source = audioCtx.createMediaElementSource(videoEl);
   const dest = audioCtx.createMediaStreamDestination();
   source.connect(dest);
-  source.connect(audioCtx.destination);
-  const tap = { audioCtx, source, dest };
+  const tap = { audioCtx, source, dest, speakersConnected: false };
   videoEl._audioTap = tap;
   return tap;
 }
@@ -43,10 +55,9 @@ function getOrCreateAudioTap(videoEl) {
 // Plays `videoEl` from the start and records its audio in chunks of
 // `chunkSeconds` of *source video* time, so long videos still produce
 // Whisper-sized (well under its 25MB cap) pieces. Resolves with an array of
-// { blob, offsetSeconds } in playback order. The video is muted to the
-// speakers for the duration (nothing routes to the AudioContext output
-// while this runs) and sped up via playbackRate to finish faster than
-// real-time.
+// { blob, offsetSeconds } in playback order. Nothing is routed to the
+// speakers for the duration (see getOrCreateAudioTap), and playback is sped
+// up via playbackRate to finish faster than real-time.
 function recordAudioFromVideo(videoEl, { chunkSeconds = 900, playbackRate = 4, onProgress, signal } = {}) {
   if (!isAudioCaptureSupported()) {
     return Promise.reject(new Error('This browser does not support in-browser audio capture (Web Audio API / MediaRecorder).'));
@@ -56,8 +67,8 @@ function recordAudioFromVideo(videoEl, { chunkSeconds = 900, playbackRate = 4, o
     return Promise.reject(new Error('No supported audio recording format found in this browser.'));
   }
 
-  const { audioCtx, dest } = getOrCreateAudioTap(videoEl);
-  const wasMuted = videoEl.muted;
+  const tap = getOrCreateAudioTap(videoEl);
+  const { audioCtx, dest } = tap;
   const originalRate = videoEl.playbackRate;
 
   return new Promise((resolve, reject) => {
@@ -92,9 +103,12 @@ function recordAudioFromVideo(videoEl, { chunkSeconds = 900, playbackRate = 4, o
       videoEl.removeEventListener('error', onVideoError);
       if (signal) signal.removeEventListener('abort', onAbort);
       videoEl.pause();
-      videoEl.muted = wasMuted;
       videoEl.playbackRate = originalRate;
       videoEl.currentTime = 0;
+      if (!tap.speakersConnected) {
+        tap.source.connect(tap.audioCtx.destination);
+        tap.speakersConnected = true;
+      }
     };
 
     const settleReject = (err) => {
@@ -145,7 +159,6 @@ function recordAudioFromVideo(videoEl, { chunkSeconds = 900, playbackRate = 4, o
 
     videoEl.pause();
     videoEl.currentTime = 0;
-    videoEl.muted = true;
     startRecorder(0);
 
     audioCtx
@@ -197,5 +210,23 @@ async function transcribeVideoAudio({ videoEl, apiKey, onProgress, signal }) {
     });
   }
   segments.sort((a, b) => a.start - b.start);
+
+  // Defense in depth against the silence-hallucination failure mode: even
+  // with a correctly wired capture graph, a video with an unusually quiet
+  // or genuinely silent audio track can still make Whisper repeat short
+  // filler phrases ("you", "thanks for watching") at every timestamp.
+  // Surface that plainly instead of quietly handing back garbage that
+  // would otherwise get summarized as if it were real content.
+  if (looksLikeHallucinatedFiller(segments)) {
+    throw new Error(t('statusAudioTranscribeUnreliable'));
+  }
   return segments;
+}
+
+function looksLikeHallucinatedFiller(segments) {
+  if (segments.length < 4) return false;
+  const normalized = segments.map((s) => s.text.trim().toLowerCase());
+  const allVeryShort = normalized.every((text) => text.split(/\s+/).length <= 3);
+  const uniqueCount = new Set(normalized).size;
+  return allVeryShort && uniqueCount <= Math.max(2, Math.ceil(segments.length * 0.15));
 }

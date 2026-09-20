@@ -55,16 +55,29 @@ body {
 .btn-ghost { background: transparent; }
 .full-width { width: 100%; margin-top: 12px; }
 
-.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.app-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+  align-items: start;
+}
 
-.input-card {
+.sidebar {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px;
-  margin-bottom: 24px;
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
-.input-card label { display: block; margin-bottom: 8px; font-size: 0.85rem; color: var(--muted); }
+.sidebar label { display: block; margin-bottom: 8px; font-size: 0.85rem; color: var(--muted); }
+
+.main-stage { min-width: 0; }
 
 .source-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
 .source-tab-btn {
@@ -141,11 +154,12 @@ details#manual-transcript-details summary { cursor: pointer; color: var(--muted)
 }
 .hint { color: var(--muted); font-size: 0.8rem; margin: 8px 0; }
 
-.workspace { display: grid; grid-template-columns: 380px 1fr; gap: 24px; }
+.video-empty-state { margin-top: 32px; padding: 60px 24px; font-size: 1rem; }
+
 .workspace.hidden { display: none; }
 .hidden { display: none !important; }
 
-.player-col { position: sticky; top: 76px; align-self: start; }
+.video-stage { max-width: 900px; margin: 0 auto 32px; }
 .player-wrap { position: relative; width: 100%; padding-bottom: 56.25%; height: 0; border-radius: var(--radius); overflow: hidden; background: #000; }
 .player-wrap #player-mount-wrap, .player-wrap #player-mount, .player-wrap iframe, .player-wrap video {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -169,15 +183,13 @@ details#manual-transcript-details summary { cursor: pointer; color: var(--muted)
 
 .empty-state { color: var(--muted); font-size: 0.9rem; padding: 24px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
 
-.lang-card {
+.summary-card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px 18px;
-  margin-bottom: 14px;
 }
-.lang-card h3 { margin: 0 0 8px; font-size: 0.85rem; color: var(--accent); text-transform: uppercase; letter-spacing: 0.03em; }
-.lang-card p { margin: 0; line-height: 1.6; }
+.summary-card p { margin: 0; line-height: 1.6; }
 
 .keypoints-list { list-style: none; padding: 0; margin: 0; }
 .keypoint-item {
@@ -186,8 +198,7 @@ details#manual-transcript-details summary { cursor: pointer; color: var(--muted)
   background: var(--panel); margin-bottom: 10px;
 }
 .keypoint-text { flex: 1; min-width: 0; }
-.kp-en { margin: 0 0 6px; }
-.kp-zh { margin: 0; color: var(--muted); }
+.keypoint-text p { margin: 0; }
 
 .time-badge {
   flex-shrink: 0;
@@ -217,7 +228,6 @@ details#manual-transcript-details summary { cursor: pointer; color: var(--muted)
 }
 .transcript-row:last-child { border-bottom: none; }
 .transcript-text p { margin: 0; line-height: 1.5; }
-.transcript-extra { color: var(--muted); font-style: italic; margin-top: 4px !important; }
 
 .modal {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
@@ -237,6 +247,7 @@ details#manual-transcript-details summary { cursor: pointer; color: var(--muted)
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 
 @media (max-width: 860px) {
-  .workspace { grid-template-columns: 1fr; }
-  .player-col { position: static; }
+  .app-layout { grid-template-columns: 1fr; padding: 16px; }
+  .sidebar { position: static; max-height: none; }
+  .video-stage { max-width: none; }
 }
