@@ -30,6 +30,22 @@ generated content support both **English** and **Chinese**.
   the original.
 - One-click UI language toggle (English / 中文) for the whole interface.
 
+## Versioning / cache-busting
+
+`index.html` links `css/style.css` and each `js/*.js` file with a `?v=<version>`
+query string, and shows the running version as a small badge next to the app
+title (also logged to the browser console on load). If you update any CSS/JS
+file, bump the version in three places so browsers don't keep serving stale
+cached copies after `index.html` itself changes:
+
+- `<meta name="app-version">` and every `?v=...` query string in `index.html`
+- `APP_VERSION` in `js/app.js`
+
+If the app ever looks like it's running an old version (e.g. a feature you
+just added doesn't appear), do a hard refresh (Ctrl/Cmd+Shift+R) or clear the
+site's cache — the version badge tells you at a glance whether you're
+actually looking at the latest files.
+
 ## Running it
 
 Any static file server works, e.g.:
