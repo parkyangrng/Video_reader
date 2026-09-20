@@ -26,10 +26,47 @@ function saveSettings() {
 
 const el = (id) => document.getElementById(id);
 
+// Long-running AI calls get this long to finish before we give up and show a
+// clear timeout error, rather than leaving the UI looking hung forever.
+const REQUEST_TIMEOUT_MS = 120000;
+
 function setStatus(msg, kind = 'info') {
   const box = el('status-msg');
   box.textContent = msg || '';
   box.className = 'status-msg' + (msg ? ` status-${kind}` : '');
+  if (msg) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// Inline error shown right next to the action that failed (Generate /
+// Translate), so it's visible even when the page is scrolled and the
+// top status bar is out of view.
+function setInlineError(id, msg) {
+  const box = el(id);
+  box.textContent = msg || '';
+  box.classList.toggle('hidden', !msg);
+  if (msg) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function showProgress(id, { indeterminate = true } = {}) {
+  const block = el(id);
+  block.classList.remove('hidden');
+  const fill = block.querySelector('.progress-fill');
+  fill.classList.toggle('indeterminate', indeterminate);
+  fill.style.width = indeterminate ? '' : '0%';
+}
+
+function setProgressLabel(id, text) {
+  el(id).querySelector('.progress-label').textContent = text || '';
+}
+
+function setProgressPercent(id, pct) {
+  const fill = el(id).querySelector('.progress-fill');
+  fill.classList.remove('indeterminate');
+  fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function hideProgress(id) {
+  el(id).classList.add('hidden');
 }
 
 function init() {
@@ -89,6 +126,8 @@ function resetForNewSource() {
   state.translated = { en: null, zh: null };
   el('manual-transcript').value = '';
   el('manual-transcript-details').open = false;
+  setInlineError('generate-error', '');
+  setInlineError('translate-error', '');
   renderAll();
 }
 
@@ -199,6 +238,8 @@ function onUseManualTranscript() {
   state.insights = null;
   state.translated = { en: null, zh: null };
   el('workspace').classList.remove('hidden');
+  setInlineError('generate-error', '');
+  setInlineError('translate-error', '');
   setStatus(t('statusManualParsed', { count: segments.length }), 'success');
   renderAll();
 }
@@ -210,6 +251,11 @@ function ensureSettingsOrPrompt() {
     return false;
   }
   return true;
+}
+
+function errorMessageFor(e) {
+  if (e.name === 'AbortError') return t('errorTimeout', { seconds: REQUEST_TIMEOUT_MS / 1000 });
+  return e.message;
 }
 
 async function onGenerateInsights() {
@@ -224,6 +270,12 @@ async function onGenerateInsights() {
   const originalLabel = btn.textContent;
   btn.textContent = t('generating');
   setStatus('');
+  setInlineError('generate-error', '');
+  showProgress('generate-progress', { indeterminate: true });
+  setProgressLabel('generate-progress', t('progressConnecting'));
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     state.insights = await generateInsights({
       provider: state.settings.provider,
@@ -231,13 +283,27 @@ async function onGenerateInsights() {
       model: state.settings.model,
       segments: state.segments,
       videoTitle: state.videoMeta?.title,
+      signal: controller.signal,
+      onProgress: (p) => {
+        if (p.stage === 'connecting') {
+          setProgressLabel('generate-progress', t('progressConnecting'));
+        } else if (p.stage === 'streaming') {
+          setProgressLabel('generate-progress', t('progressStreaming', { chars: p.charsReceived }));
+        } else if (p.stage === 'parsing') {
+          setProgressLabel('generate-progress', t('progressParsing'));
+        }
+      },
     });
     renderSummary();
     renderKeyPoints();
     switchTab('summary');
   } catch (e) {
-    setStatus(t('statusGenerateFailed', { error: e.message }), 'error');
+    const message = errorMessageFor(e);
+    setStatus(t('statusGenerateFailed', { error: message }), 'error');
+    setInlineError('generate-error', t('statusGenerateFailed', { error: message }));
   } finally {
+    clearTimeout(timeoutId);
+    hideProgress('generate-progress');
     btn.disabled = false;
     btn.textContent = originalLabel;
   }
@@ -256,6 +322,12 @@ async function onTranslateTranscript() {
   const originalLabel = btn.textContent;
   btn.textContent = t('translating');
   setStatus('');
+  setInlineError('translate-error', '');
+  showProgress('translate-progress', { indeterminate: false });
+  setProgressPercent('translate-progress', 0);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const translated = await translateTranscript({
       provider: state.settings.provider,
@@ -263,12 +335,23 @@ async function onTranslateTranscript() {
       model: state.settings.model,
       segments: state.segments,
       targetLang,
+      signal: controller.signal,
+      onProgress: (p) => {
+        if (p.stage === 'batch') {
+          setProgressLabel('translate-progress', t('progressTranslateBatch', { current: p.batchIndex, total: p.totalBatches }));
+          setProgressPercent('translate-progress', ((p.batchIndex - 1) / p.totalBatches) * 100);
+        }
+      },
     });
     state.translated[targetLang] = translated;
     renderTranscript();
   } catch (e) {
-    setStatus(t('statusTranslateFailed', { error: e.message }), 'error');
+    const message = errorMessageFor(e);
+    setStatus(t('statusTranslateFailed', { error: message }), 'error');
+    setInlineError('translate-error', t('statusTranslateFailed', { error: message }));
   } finally {
+    clearTimeout(timeoutId);
+    hideProgress('translate-progress');
     btn.disabled = false;
     btn.textContent = t(state.translated.en || state.translated.zh ? 'retranslate' : 'translateTranscript');
   }

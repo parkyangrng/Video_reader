@@ -100,6 +100,28 @@ body {
 .status-success { color: #6fd88a; }
 .status-info { color: var(--muted); }
 
+.progress-block { margin-top: 12px; }
+.progress-bar {
+  width: 100%; height: 6px; border-radius: 999px;
+  background: var(--panel-alt); border: 1px solid var(--border);
+  overflow: hidden; position: relative;
+}
+.progress-fill {
+  height: 100%; width: 0%; border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+.progress-fill.indeterminate {
+  width: 40% !important;
+  position: absolute; top: 0; left: 0;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+.progress-label { margin-top: 6px; font-size: 0.8rem; color: var(--muted); min-height: 1.1em; }
+
 details#manual-transcript-details { margin-top: 14px; }
 details#manual-transcript-details summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
 #manual-transcript {

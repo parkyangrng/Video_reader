@@ -48,9 +48,62 @@ function extractJson(raw) {
   return JSON.parse(s.slice(start, end + 1));
 }
 
-async function callAnthropic(apiKey, model, system, user, maxTokens = 4096) {
+// Reads a streamed SSE response body, extracting incremental text deltas
+// from either Anthropic's or OpenAI's streaming event shapes, and calls
+// onDelta(delta, fullTextSoFar) for each chunk as it arrives. This is what
+// lets the UI show live "still working" progress instead of a single
+// long silent wait.
+async function streamSSE(response, onDelta) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const dataStr = trimmed.slice(5).trim();
+      if (!dataStr || dataStr === '[DONE]') continue;
+      let json;
+      try {
+        json = JSON.parse(dataStr);
+      } catch (e) {
+        continue;
+      }
+      let delta = '';
+      if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta') {
+        delta = json.delta.text;
+      } else if (json.choices?.[0]?.delta?.content) {
+        delta = json.choices[0].delta.content;
+      }
+      if (delta) {
+        fullText += delta;
+        onDelta(delta, fullText);
+      }
+    }
+  }
+  return fullText;
+}
+
+async function readErrorMessage(res) {
+  try {
+    const data = await res.json();
+    return data?.error?.message || `HTTP ${res.status}`;
+  } catch (e) {
+    return `HTTP ${res.status}`;
+  }
+}
+
+async function callAnthropic(apiKey, model, system, user, maxTokens = 4096, opts = {}) {
+  const { onDelta, signal } = opts;
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal,
     headers: {
       'content-type': 'application/json',
       'x-api-key': apiKey,
@@ -62,16 +115,20 @@ async function callAnthropic(apiKey, model, system, user, maxTokens = 4096) {
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content: user }],
+      stream: !!onDelta,
     }),
   });
+  if (!res.ok) throw new Error(`Anthropic API error: ${await readErrorMessage(res)}`);
+  if (onDelta) return streamSSE(res, onDelta);
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || `Anthropic API error (${res.status})`);
   return (data.content || []).map((c) => c.text || '').join('');
 }
 
-async function callOpenAI(apiKey, model, system, user, maxTokens = 4096) {
+async function callOpenAI(apiKey, model, system, user, maxTokens = 4096, opts = {}) {
+  const { onDelta, signal } = opts;
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
+    signal,
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${apiKey}`,
@@ -83,22 +140,30 @@ async function callOpenAI(apiKey, model, system, user, maxTokens = 4096) {
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
+      stream: !!onDelta,
     }),
   });
+  if (!res.ok) throw new Error(`OpenAI API error: ${await readErrorMessage(res)}`);
+  if (onDelta) return streamSSE(res, onDelta);
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message || `OpenAI API error (${res.status})`);
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callProvider(provider, apiKey, model, system, user, maxTokens) {
-  if (provider === 'openai') return callOpenAI(apiKey, model, system, user, maxTokens);
-  return callAnthropic(apiKey, model, system, user, maxTokens);
+async function callProvider(provider, apiKey, model, system, user, maxTokens, opts) {
+  if (provider === 'openai') return callOpenAI(apiKey, model, system, user, maxTokens, opts);
+  return callAnthropic(apiKey, model, system, user, maxTokens, opts);
 }
 
-async function generateInsights({ provider, apiKey, model, segments, videoTitle }) {
+async function generateInsights({ provider, apiKey, model, segments, videoTitle, onProgress, signal }) {
   if (!apiKey) throw new Error('Missing API key.');
+  onProgress?.({ stage: 'preparing' });
   const { system, user } = buildInsightsPrompt(segments, videoTitle);
-  const raw = await callProvider(provider, apiKey, model, system, user, 4096);
+  onProgress?.({ stage: 'connecting' });
+  const raw = await callProvider(provider, apiKey, model, system, user, 8192, {
+    signal,
+    onDelta: (delta, fullText) => onProgress?.({ stage: 'streaming', charsReceived: fullText.length }),
+  });
+  onProgress?.({ stage: 'parsing' });
   const json = extractJson(raw);
   if (!json.summary || !Array.isArray(json.key_points)) {
     throw new Error('AI response was missing expected fields.');
@@ -106,22 +171,27 @@ async function generateInsights({ provider, apiKey, model, segments, videoTitle 
   json.key_points = json.key_points
     .filter((kp) => typeof kp.time === 'number' && kp.en && kp.zh)
     .sort((a, b) => a.time - b.time);
+  onProgress?.({ stage: 'done' });
   return json;
 }
 
 // Translates transcript lines into targetLang ('en' or 'zh') in numbered
 // batches so the response can be parsed back into per-line order reliably.
-async function translateTranscript({ provider, apiKey, model, segments, targetLang }) {
+// Reports batch-level progress since the batch count is known up front.
+async function translateTranscript({ provider, apiKey, model, segments, targetLang, onProgress, signal }) {
   if (!apiKey) throw new Error('Missing API key.');
   const targetName = targetLang === 'zh' ? 'Simplified Chinese' : 'English';
   const batchSize = 80;
   const results = new Array(segments.length).fill('');
+  const totalBatches = Math.ceil(segments.length / batchSize);
 
   for (let i = 0; i < segments.length; i += batchSize) {
+    const batchIndex = Math.floor(i / batchSize) + 1;
+    onProgress?.({ stage: 'batch', batchIndex, totalBatches });
     const batch = segments.slice(i, i + batchSize);
     const numbered = batch.map((s, idx) => `${idx + 1}) ${s.text}`).join('\n');
     const system = `You are a professional subtitle translator. Translate each numbered line into ${targetName}. Respond with ONLY the same numbered lines translated, one per line, in the same order, using the format "N) translated text". Do not merge, skip, add, or reorder lines. Keep translations concise and natural.`;
-    const raw = await callProvider(provider, apiKey, model, system, numbered, 4096);
+    const raw = await callProvider(provider, apiKey, model, system, numbered, 4096, { signal });
     const lineMap = {};
     raw.split('\n').forEach((line) => {
       const m = line.match(/^\s*(\d+)\)\s?(.*)$/);
@@ -131,5 +201,6 @@ async function translateTranscript({ provider, apiKey, model, segments, targetLa
       results[i + idx] = lineMap[idx + 1] || '';
     });
   }
+  onProgress?.({ stage: 'done' });
   return results;
 }

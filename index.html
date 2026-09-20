@@ -65,6 +65,11 @@
         <h2 id="video-title"></h2>
         <p id="video-author" class="muted"></p>
         <button id="generate-btn" class="btn btn-primary full-width" type="button" data-i18n="generateInsights">Generate Summary &amp; Key Points</button>
+        <div id="generate-progress" class="progress-block hidden">
+          <div class="progress-bar"><div class="progress-fill indeterminate"></div></div>
+          <div class="progress-label"></div>
+        </div>
+        <div id="generate-error" class="status-msg status-error hidden"></div>
       </div>
 
       <div class="content-col">
@@ -89,6 +94,11 @@
             <input id="transcript-search" type="text" data-i18n-placeholder="searchTranscript" placeholder="Search transcript..." />
             <button id="translate-transcript-btn" class="btn btn-secondary" type="button" data-i18n="translateTranscript">Translate</button>
           </div>
+          <div id="translate-progress" class="progress-block hidden">
+            <div class="progress-bar"><div class="progress-fill"></div></div>
+            <div class="progress-label"></div>
+          </div>
+          <div id="translate-error" class="status-msg status-error hidden"></div>
           <div id="transcript-list" class="transcript-list"></div>
         </div>
       </div>
