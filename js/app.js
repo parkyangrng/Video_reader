@@ -2,7 +2,7 @@
 // Bump this (and the ?v= query strings + <meta name="app-version"> in
 // index.html) on every change to js/css so browsers don't silently keep
 // serving stale cached assets after index.html itself is reloaded/updated.
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 const state = {
   sourceType: 'youtube', // 'youtube' | 'url' | 'file'

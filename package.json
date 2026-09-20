@@ -1,0 +1,13 @@
+{
+  "name": "youtube-video-reader",
+  "version": "1.5.0",
+  "private": true,
+  "description": "Static client-only web app that plays a video and uses AI to produce a summary, time-stamped key points, and transcript.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

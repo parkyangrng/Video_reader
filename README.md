@@ -60,15 +60,34 @@ actually looking at the latest files.
 
 ## Running it
 
-Any static file server works, e.g.:
+**Don't open `index.html` directly (`file://...`)** — YouTube playback in
+particular tends to break: the IFrame Player API talks to its embedded
+iframe via `postMessage`, and browsers treat `file://` pages as opaque,
+one-off origins, which can silently break that communication (the player
+never reports "ready", or controls stop responding). Some transcript-fetch
+proxies also reject `file://` origins outright. Serve the app over a real
+`http://localhost` origin instead:
+
+```bash
+npm start
+# or: node server.js
+# or: ./start.sh        (macOS/Linux)
+# or: double-click start.bat   (Windows)
+```
+
+This starts a zero-dependency local server (`server.js`, built on Node's
+`http` module — no `npm install` needed) and opens your default browser to
+it automatically. If port 8080 is taken it tries the next one and prints
+whichever URL it actually bound; pass a specific port with `node server.js
+3000`.
+
+No Node available? Any static file server works just as well, e.g.:
 
 ```bash
 python3 -m http.server 8080
 ```
 
-Then open `http://localhost:8080`. (Opening `index.html` directly via
-`file://` may also work in some browsers, but a local server is more
-reliable for the network requests this app makes.)
+Then open `http://localhost:8080` yourself.
 
 ## AI provider setup
 
