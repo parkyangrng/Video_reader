@@ -1,0 +1,315 @@
+// Main application state & UI wiring.
+const state = {
+  videoId: null,
+  videoMeta: null,
+  segments: [],
+  transcriptLang: null,
+  insights: null,
+  translated: { en: null, zh: null },
+  settings: loadSettings(),
+};
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem('yvr_settings');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    /* ignore */
+  }
+  return { provider: 'anthropic', model: DEFAULT_MODELS.anthropic, apiKey: '' };
+}
+
+function saveSettings() {
+  localStorage.setItem('yvr_settings', JSON.stringify(state.settings));
+}
+
+const el = (id) => document.getElementById(id);
+
+function setStatus(msg, kind = 'info') {
+  const box = el('status-msg');
+  box.textContent = msg || '';
+  box.className = 'status-msg' + (msg ? ` status-${kind}` : '');
+}
+
+function init() {
+  applyI18n();
+  el('lang-toggle').addEventListener('click', () => {
+    setUiLang(getUiLang() === 'en' ? 'zh' : 'en');
+    renderAll();
+  });
+
+  el('load-btn').addEventListener('click', onLoadVideo);
+  el('video-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') onLoadVideo();
+  });
+  el('use-manual-transcript').addEventListener('click', onUseManualTranscript);
+  el('generate-btn').addEventListener('click', onGenerateInsights);
+  el('translate-transcript-btn').addEventListener('click', onTranslateTranscript);
+  el('transcript-search').addEventListener('input', renderTranscript);
+
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  el('settings-btn').addEventListener('click', openSettings);
+  el('settings-cancel').addEventListener('click', closeSettings);
+  el('settings-save').addEventListener('click', onSaveSettings);
+  el('provider-select').addEventListener('change', () => {
+    el('model-input').value = DEFAULT_MODELS[el('provider-select').value];
+  });
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${tab}`));
+}
+
+async function onLoadVideo() {
+  const input = el('video-input').value;
+  const videoId = parseVideoId(input);
+  if (!videoId) {
+    setStatus(t('errorNoVideoId'), 'error');
+    return;
+  }
+
+  state.videoId = videoId;
+  state.segments = [];
+  state.transcriptLang = null;
+  state.insights = null;
+  state.translated = { en: null, zh: null };
+  el('workspace').classList.remove('hidden');
+  loadPlayer(videoId, 'player');
+
+  setStatus(t('statusFetchingMeta'));
+  try {
+    const meta = await fetchOEmbed(videoId);
+    state.videoMeta = meta;
+    el('video-title').textContent = meta.title || '';
+    el('video-author').textContent = meta.author_name || '';
+  } catch (e) {
+    state.videoMeta = null;
+    el('video-title').textContent = '';
+    el('video-author').textContent = '';
+  }
+
+  setStatus(t('statusFetchingTranscript'));
+  try {
+    const { segments, lang } = await fetchTranscript(videoId);
+    state.segments = segments;
+    state.transcriptLang = lang;
+    setStatus(t('statusTranscriptLoaded', { count: segments.length, lang }), 'success');
+    el('manual-transcript-details').open = false;
+  } catch (e) {
+    setStatus(t('statusFetchingTranscriptFailed'), 'error');
+    el('manual-transcript-details').open = true;
+  }
+  renderAll();
+}
+
+function onUseManualTranscript() {
+  const text = el('manual-transcript').value;
+  if (!text.trim()) return;
+  const { segments } = parseManualTranscript(text);
+  state.segments = segments;
+  state.transcriptLang = null;
+  state.insights = null;
+  state.translated = { en: null, zh: null };
+  el('workspace').classList.remove('hidden');
+  setStatus(t('statusManualParsed', { count: segments.length }), 'success');
+  renderAll();
+}
+
+function ensureSettingsOrPrompt() {
+  if (!state.settings.apiKey) {
+    setStatus(t('statusNeedApiKey'), 'error');
+    openSettings();
+    return false;
+  }
+  return true;
+}
+
+async function onGenerateInsights() {
+  if (!state.segments.length) {
+    setStatus(t('errorNeedTranscript'), 'error');
+    return;
+  }
+  if (!ensureSettingsOrPrompt()) return;
+
+  const btn = el('generate-btn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = t('generating');
+  setStatus('');
+  try {
+    state.insights = await generateInsights({
+      provider: state.settings.provider,
+      apiKey: state.settings.apiKey,
+      model: state.settings.model,
+      segments: state.segments,
+      videoTitle: state.videoMeta?.title,
+    });
+    renderSummary();
+    renderKeyPoints();
+    switchTab('summary');
+  } catch (e) {
+    setStatus(t('statusGenerateFailed', { error: e.message }), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
+async function onTranslateTranscript() {
+  if (!state.segments.length) {
+    setStatus(t('errorNeedTranscript'), 'error');
+    return;
+  }
+  if (!ensureSettingsOrPrompt()) return;
+
+  const targetLang = state.transcriptLang && state.transcriptLang.startsWith('zh') ? 'en' : 'zh';
+  const btn = el('translate-transcript-btn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = t('translating');
+  setStatus('');
+  try {
+    const translated = await translateTranscript({
+      provider: state.settings.provider,
+      apiKey: state.settings.apiKey,
+      model: state.settings.model,
+      segments: state.segments,
+      targetLang,
+    });
+    state.translated[targetLang] = translated;
+    renderTranscript();
+  } catch (e) {
+    setStatus(t('statusTranslateFailed', { error: e.message }), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t(state.translated.en || state.translated.zh ? 'retranslate' : 'translateTranscript');
+  }
+}
+
+function renderAll() {
+  renderTranscript();
+  renderSummary();
+  renderKeyPoints();
+}
+
+function renderSummary() {
+  const empty = el('summary-empty');
+  const content = el('summary-content');
+  if (!state.insights) {
+    empty.classList.remove('hidden');
+    content.classList.add('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  content.classList.remove('hidden');
+  content.innerHTML = `
+    <div class="lang-card">
+      <h3>${t('summaryHeadingEn')}</h3>
+      <p>${escapeHtml(state.insights.summary.en)}</p>
+    </div>
+    <div class="lang-card">
+      <h3>${t('summaryHeadingZh')}</h3>
+      <p>${escapeHtml(state.insights.summary.zh)}</p>
+    </div>
+  `;
+}
+
+function renderKeyPoints() {
+  const empty = el('keypoints-empty');
+  const list = el('keypoints-list');
+  if (!state.insights || !state.insights.key_points.length) {
+    empty.classList.remove('hidden');
+    list.innerHTML = '';
+    return;
+  }
+  empty.classList.add('hidden');
+  list.innerHTML = state.insights.key_points
+    .map(
+      (kp) => `
+      <li class="keypoint-item">
+        <button class="time-badge" data-time="${kp.time}">${formatTime(kp.time)}</button>
+        <div class="keypoint-text">
+          <p class="kp-en">${escapeHtml(kp.en)}</p>
+          <p class="kp-zh">${escapeHtml(kp.zh)}</p>
+        </div>
+      </li>`
+    )
+    .join('');
+  list.querySelectorAll('.time-badge').forEach((btn) => {
+    btn.addEventListener('click', () => seekPlayerTo(parseFloat(btn.dataset.time)));
+  });
+}
+
+function renderTranscript() {
+  const listEl = el('transcript-list');
+  const query = (el('transcript-search').value || '').trim().toLowerCase();
+  if (!state.segments.length) {
+    listEl.innerHTML = `<div class="empty-state">${t('statusNoTranscript')}</div>`;
+    return;
+  }
+  const enTrans = state.translated.en;
+  const zhTrans = state.translated.zh;
+
+  const rows = state.segments
+    .map((seg, idx) => {
+      const extra = enTrans ? enTrans[idx] : zhTrans ? zhTrans[idx] : null;
+      const matches =
+        !query ||
+        seg.text.toLowerCase().includes(query) ||
+        (extra && extra.toLowerCase().includes(query));
+      if (!matches) return '';
+      const timeHtml =
+        seg.start != null
+          ? `<button class="time-badge" data-time="${seg.start}">${formatTime(seg.start)}</button>`
+          : `<span class="time-badge disabled">${t('noTimeLabel')}</span>`;
+      const extraHtml = extra ? `<p class="transcript-extra">${escapeHtml(extra)}</p>` : '';
+      return `
+        <div class="transcript-row">
+          ${timeHtml}
+          <div class="transcript-text">
+            <p>${escapeHtml(seg.text)}</p>
+            ${extraHtml}
+          </div>
+        </div>`;
+    })
+    .join('');
+  listEl.innerHTML = rows || `<div class="empty-state">${t('statusNoTranscript')}</div>`;
+  listEl.querySelectorAll('.time-badge:not(.disabled)').forEach((btn) => {
+    btn.addEventListener('click', () => seekPlayerTo(parseFloat(btn.dataset.time)));
+  });
+  el('translate-transcript-btn').textContent = t(enTrans || zhTrans ? 'retranslate' : 'translateTranscript');
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str ?? '';
+  return d.innerHTML;
+}
+
+function openSettings() {
+  el('provider-select').value = state.settings.provider;
+  el('model-input').value = state.settings.model || DEFAULT_MODELS[state.settings.provider];
+  el('api-key-input').value = state.settings.apiKey || '';
+  el('settings-modal').classList.remove('hidden');
+}
+
+function closeSettings() {
+  el('settings-modal').classList.add('hidden');
+}
+
+function onSaveSettings() {
+  state.settings = {
+    provider: el('provider-select').value,
+    model: el('model-input').value.trim() || DEFAULT_MODELS[el('provider-select').value],
+    apiKey: el('api-key-input').value.trim(),
+  };
+  saveSettings();
+  closeSettings();
+  setStatus('');
+}
+
+document.addEventListener('DOMContentLoaded', init);

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YouTube Video Reader</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎬 <span data-i18n="appTitle">YouTube Video Reader</span></div>
+    <div class="top-actions">
+      <button id="lang-toggle" class="btn btn-ghost" type="button">中文</button>
+      <button id="settings-btn" class="btn btn-ghost" type="button" data-i18n="settings">Settings</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="input-card">
+      <label for="video-input" data-i18n="videoUrlLabel">YouTube video URL or ID</label>
+      <div class="input-row">
+        <input id="video-input" type="text" data-i18n-placeholder="videoUrlPlaceholder" placeholder="https://www.youtube.com/watch?v=..." />
+        <button id="load-btn" class="btn btn-primary" type="button" data-i18n="load">Load Video</button>
+      </div>
+      <div id="status-msg" class="status-msg"></div>
+      <details id="manual-transcript-details">
+        <summary data-i18n="manualTranscriptToggle">Transcript didn't load automatically? Paste it manually</summary>
+        <textarea id="manual-transcript" rows="8" data-i18n-placeholder="manualTranscriptPlaceholder"></textarea>
+        <div class="hint" data-i18n="manualTranscriptHint">Tip: timestamps let key points link back to exact moments.</div>
+        <button id="use-manual-transcript" class="btn btn-secondary" type="button" data-i18n="useThisTranscript">Use this transcript</button>
+      </details>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <div class="player-col">
+        <div class="player-wrap"><div id="player"></div></div>
+        <h2 id="video-title"></h2>
+        <p id="video-author" class="muted"></p>
+        <button id="generate-btn" class="btn btn-primary full-width" type="button" data-i18n="generateInsights">Generate Summary &amp; Key Points</button>
+      </div>
+
+      <div class="content-col">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="summary" type="button" data-i18n="tabSummary">Summary</button>
+          <button class="tab-btn" data-tab="keypoints" type="button" data-i18n="tabKeyPoints">Key Points</button>
+          <button class="tab-btn" data-tab="transcript" type="button" data-i18n="tabTranscript">Transcript</button>
+        </div>
+
+        <div id="tab-summary" class="tab-panel active">
+          <div id="summary-empty" class="empty-state" data-i18n="summaryEmpty">Click "Generate" to create an AI summary.</div>
+          <div id="summary-content" class="hidden"></div>
+        </div>
+
+        <div id="tab-keypoints" class="tab-panel">
+          <div id="keypoints-empty" class="empty-state" data-i18n="keypointsEmpty">Key knowledge points with clickable timestamps will appear here.</div>
+          <ol id="keypoints-list" class="keypoints-list"></ol>
+        </div>
+
+        <div id="tab-transcript" class="tab-panel">
+          <div class="transcript-toolbar">
+            <input id="transcript-search" type="text" data-i18n-placeholder="searchTranscript" placeholder="Search transcript..." />
+            <button id="translate-transcript-btn" class="btn btn-secondary" type="button" data-i18n="translateTranscript">Translate</button>
+          </div>
+          <div id="transcript-list" class="transcript-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3 data-i18n="settingsTitle">AI Provider Settings</h3>
+      <label for="provider-select" data-i18n="providerLabel">Provider</label>
+      <select id="provider-select">
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="openai">OpenAI (GPT)</option>
+      </select>
+      <label for="model-input" data-i18n="modelLabel">Model</label>
+      <input id="model-input" type="text" />
+      <label for="api-key-input" data-i18n="apiKeyLabel">API Key</label>
+      <input id="api-key-input" type="password" placeholder="sk-..." />
+      <p class="hint" data-i18n="apiKeyHint">Stored only in your browser's local storage.</p>
+      <div class="modal-actions">
+        <button id="settings-cancel" class="btn btn-ghost" type="button" data-i18n="cancel">Cancel</button>
+        <button id="settings-save" class="btn btn-primary" type="button" data-i18n="save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/youtube.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
