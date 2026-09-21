@@ -43,23 +43,30 @@ function fetchWithTimeout(url, timeoutMs) {
 }
 
 const CORS_PROXIES = [
-  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
+  { name: 'allorigins', build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
+  { name: 'corsproxy.io', build: (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}` },
+  { name: 'codetabs', build: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}` },
+  { name: 'thingproxy', build: (url) => `https://thingproxy.freeboard.io/fetch/${url}` },
 ];
 
+// Tries each public CORS proxy in turn and returns the first successful
+// response body. On total failure, throws an error that names every proxy
+// tried and why each one failed, rather than a single opaque message — the
+// individual proxies are free, third-party, and unreliable, so knowing
+// *which* one failed (rate limit? timeout? consent page?) is the
+// difference between a fixable problem and a dead end.
 async function fetchWithProxies(url, timeoutMs = 12000) {
-  let lastError = null;
-  for (const buildProxyUrl of CORS_PROXIES) {
+  const failures = [];
+  for (const proxy of CORS_PROXIES) {
     try {
-      const res = await fetchWithTimeout(buildProxyUrl(url), timeoutMs);
+      const res = await fetchWithTimeout(proxy.build(url), timeoutMs);
       if (res.ok) return await res.text();
-      lastError = new Error(`HTTP ${res.status}`);
+      failures.push(`${proxy.name}: HTTP ${res.status}`);
     } catch (e) {
-      lastError = e;
+      failures.push(`${proxy.name}: ${e.name === 'AbortError' ? 'timed out' : e.message}`);
     }
   }
-  throw lastError || new Error('All proxies failed');
+  throw new Error(`All proxies failed (${failures.join('; ')})`);
 }
 
 function formatTime(totalSeconds) {
@@ -120,21 +127,34 @@ function parseTimeToSeconds(str) {
 // transcript paste.
 async function fetchTranscript(videoId, preferredLangs = ['en', 'zh-Hans', 'zh-Hant', 'zh']) {
   const watchUrl = `https://www.youtube.com/watch?v=${videoId}&hl=en`;
-  const html = await fetchWithProxies(watchUrl);
+  let html;
+  try {
+    html = await fetchWithProxies(watchUrl);
+  } catch (e) {
+    throw new Error(`Couldn't load the video page through any proxy: ${e.message}`);
+  }
 
   const marker = '"captionTracks":';
   const markerIdx = html.indexOf(marker);
   if (markerIdx === -1) {
-    throw new Error('No caption tracks found for this video.');
+    // A common cause besides "genuinely no captions": the proxy returned
+    // something other than the real watch page (a consent/cookie
+    // interstitial, an error page, a truncated response), which won't
+    // contain this marker at all.
+    const looksLikeRealPage = /<title[^>]*>/i.test(html) && html.length > 5000;
+    const hint = looksLikeRealPage
+      ? 'This video likely has no captions (manual or auto-generated).'
+      : `The proxy returned an unexpected page (${html.length} chars) instead of the real watch page — possibly a consent/interstitial page or an error from the proxy itself.`;
+    throw new Error(`No caption track data found. ${hint}`);
   }
   const arrayStart = html.indexOf('[', markerIdx + marker.length);
-  if (arrayStart === -1) throw new Error('No caption tracks found for this video.');
+  if (arrayStart === -1) throw new Error('No caption track data found (malformed page data).');
   const arrayJson = extractBalancedJson(html, arrayStart, '[', ']');
   let tracks;
   try {
     tracks = JSON.parse(arrayJson.replace(/\\u0026/g, '&'));
   } catch (e) {
-    throw new Error('Could not parse caption track list.');
+    throw new Error(`Could not parse caption track list: ${e.message}`);
   }
   if (!tracks.length) throw new Error('This video has no captions available.');
 
@@ -145,12 +165,17 @@ async function fetchTranscript(videoId, preferredLangs = ['en', 'zh-Hans', 'zh-H
     tracks[0];
 
   const baseUrl = track.baseUrl.replace(/\\u0026/g, '&');
-  const transcriptText = await fetchWithProxies(`${baseUrl}&fmt=json3`);
+  let transcriptText;
+  try {
+    transcriptText = await fetchWithProxies(`${baseUrl}&fmt=json3`);
+  } catch (e) {
+    throw new Error(`Found a caption track but couldn't fetch its text through any proxy: ${e.message}`);
+  }
   let data;
   try {
     data = JSON.parse(transcriptText);
   } catch (e) {
-    throw new Error('Could not parse transcript data.');
+    throw new Error(`Could not parse transcript data: ${e.message}`);
   }
 
   const segments = (data.events || [])

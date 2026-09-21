@@ -114,10 +114,24 @@ which is required to call the Claude API directly from a browser.
 - **Automatic transcript fetching is best-effort.** YouTube does not allow
   arbitrary web pages to read caption data directly (no CORS headers), so
   this app scrapes the watch page and caption endpoint through public CORS
-  proxies (`allorigins.win`, `corsproxy.io`, `thingproxy`). These free
-  proxies can be slow, rate-limited, or temporarily down. When automatic
-  fetch fails, use the "paste it manually" box — copy the transcript text
-  from YouTube's own "Show transcript" panel under a video.
+  proxies (`allorigins.win`, `corsproxy.io`, `codetabs`, `thingproxy`, tried
+  in that order). These are free, third-party services outside this app's
+  control — they can be slow, rate-limited, or temporarily down, and
+  sometimes return something other than the real watch page (a consent
+  interstitial, a rate-limit page). When automatic fetch fails, the status
+  message names which stage failed and why for each proxy tried, rather
+  than a generic "didn't work" — useful for telling a genuinely
+  caption-less video apart from a flaky proxy. Either way, the fallback is
+  the "paste it manually" box: copy the transcript text from YouTube's own
+  "Show transcript" panel under a video.
+- **There's no audio-based fallback for YouTube** the way there is for a
+  Local File. A YouTube video plays in a cross-origin iframe with no
+  accessible media element or audio stream at all — capturing its audio
+  isn't technically possible from the embedding page. The only way around
+  that would be to download the video/audio stream directly, which
+  circumvents YouTube's own access controls and isn't something this app
+  does. For a YouTube video with no captions, manual paste (or subtitle
+  upload, if you have one) is the way to get a transcript.
 - Very long transcripts are truncated to fit the model's context window when
   generating insights (a note is added to the prompt in that case).
 - **Video URL / Local File sources have no automatic transcript.** There's no

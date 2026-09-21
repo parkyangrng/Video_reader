@@ -37,7 +37,7 @@ const STRINGS = {
   save: 'Save',
   statusFetchingMeta: 'Loading video info…',
   statusFetchingTranscript: 'Fetching transcript automatically…',
-  statusFetchingTranscriptFailed: "Couldn't fetch the transcript automatically (YouTube blocks this from a browser without a server). Please paste the transcript manually below.",
+  statusFetchingTranscriptFailed: "Couldn't fetch the transcript automatically: {error} — please paste the transcript manually below (copy it from YouTube's own \"Show transcript\" panel under the video).",
   statusTranscriptLoaded: 'Transcript loaded ({count} lines, language: {lang}).',
   statusNoTranscript: 'No transcript yet. Load a video or paste a transcript manually.',
   statusNeedApiKey: 'Add an API key in Settings first.',

@@ -2,7 +2,7 @@
 // Bump this (and the ?v= query strings + <meta name="app-version"> in
 // index.html) on every change to js/css so browsers don't silently keep
 // serving stale cached assets after index.html itself is reloaded/updated.
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 const state = {
   sourceType: 'youtube', // 'youtube' | 'url' | 'file'
@@ -184,7 +184,8 @@ async function onLoadVideo() {
     setStatus(t('statusTranscriptLoaded', { count: segments.length, lang }), 'success');
     el('manual-transcript-details').open = false;
   } catch (e) {
-    setStatus(t('statusFetchingTranscriptFailed'), 'error');
+    console.error('YouTube transcript auto-fetch failed:', e);
+    setStatus(t('statusFetchingTranscriptFailed', { error: e.message }), 'error');
     el('manual-transcript-details').open = true;
   }
   renderAll();
